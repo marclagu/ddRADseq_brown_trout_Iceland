@@ -1,0 +1,47 @@
+
+#################### DEMULTIPLEXING ####################
+process_radtags -1 ./S1_L001_R1_001.fastq.gz -2 ./S1_L001_R2_001.fastq.gz -b barcodes -o ./demultiplexed/ -D -r -t 115 \
+ --renz_1 apeKI --renz_2 bamHI --inline_inline -i gzfastq -E phred33 --clean --adapter_1 AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT \
+ --adapter_2 AGATCGGAAGAGCGGTTCAGCAGGAATGCCGAG --adapter_mm 2 --paired --quality
+
+#################### USTACKS ####################
+ustacks -f $src/demultiplexed/${sample}.1.fq.gz -o $src/ustacks -i $id --name $sample -M 2 -p 8
+
+#################### BUILDING CATALOG: CSTACKS ####################
+cstacks -P ./ustacks/ -M popmap.catalog.tsv -n 2 -p 12
+
+#################### SSTACKS ####################
+sstacks -P ./ustacks/ -M ./popmap.olfusa.tsv -p 12
+
+#################### TSV2BAM ####################
+tsv2bam -P ./ustacks/ -M ./popmap.olfusa.tsv -t 12 --pe-reads-dir ./catalog/demultiplexed/
+
+#################### GSTACKS ####################
+gstacks -P ./ustacks/ -M ./popmap.olfusa.tsv -t 12
+
+#################### POPULATIONS ####################
+populations -P ./ustacks/ -M ./popmap.olfusa.tsv -O ./populations/ -r 0.66 --min_maf 0.05 --max_obs_het 0.6 --vcf -t 12
+
+#################### VCFTOOLS ####################
+
+# Filtering by relatedness
+
+vcftools --relatedness2 --vcf populations.snps.vcf --out samples
+
+# Kinship range
+#  >0.354 = duplicate/MZ twin
+# [0.177, 0.354] = 1st-degree
+# [0.0884, 0.177] = 2nd-degree
+# [0.0442, 0.0884] = 3rd-degree
+
+vcftools --vcf populations.snps.vcf --remove blacklist_siblings --recode --recode-INFO-all --out olfusa.filtered
+
+vcftools --vcf olfusa.filtered.recode.vcf --mac 3 --maf 0.05 --minDP 3 --recode --recode-INFO-all --out pop01
+
+vcftools --vcf pop01.recode.vcf --missing-indv
+
+vcftools --vcf pop01.recode.vcf --remove lowDP.indv --recode --recode-INFO-all --out pop02
+
+#################### RAxML ####################
+
+raxml -m GTRGAMMA -p 123456 -s ./olfusa.phylip -x 100 -# autoFC -f a -n olfusa -T 6
